@@ -11,6 +11,14 @@
 | Policy | toàn bộ kết quả trên | `PolicyResult` |
 | Verifier | `CaseInput`, `CaseOutput` | không trả dữ liệu; raise lỗi nếu sai |
 
+Production implementation bọc mỗi deterministic domain operation bằng LLM agent
+trong `src/agents/llm_agents.py`. Mỗi agent bắt buộc gọi LLM để chọn đúng domain
+tool; runtime thực thi tool rồi handoff typed result cho Coordinator. Không gọi
+LLM lần hai chỉ để diễn đạt lại kết quả đã được type hóa.
+
+Prompt chuyên biệt được load từ `src/prompts/<agent>.md`. Prompt chỉ mô tả vai
+trò và contract; Python schema/tool/verifier vẫn là authority cuối cùng.
+
 Quy ước:
 
 - ID trung gian bỏ prefix evidence: `item_id` là `<order_id>:<order_item_id>`.
@@ -19,4 +27,5 @@ Quy ước:
 - Mảng giữ thứ tự nguồn; không dùng `set` nếu làm thay đổi thứ tự.
 - Order không có item: các tổng đối soát phụ thuộc item là `None` (`null` khi ghi JSON).
 - Agent domain không tự ghi output và không tự áp dụng policy.
-
+- Không được dùng LLM để tự cộng tiền, tính giờ hoặc tạo ID; LLM gọi Python tool
+  và bàn giao kết quả đã type hóa.
