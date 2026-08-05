@@ -6,7 +6,6 @@
 | --- | --- |
 | Họ và tên | Trần Minh Hiển |
 | MSSV | 2A202601812 |
-| Mã nộp bài | 01819 (5 số cuối mã học viên trên hệ thống chấm) |
 | Khóa/Lớp | K4 / D303 |
 | Vai trò chính | Coordinator Agent và shared schema/contracts |
 | Ngày hoàn thành | 2026-08-05 |
