@@ -112,7 +112,7 @@ reconciled
 
 Với order không có item row, `expected_total_brl`, `difference_brl` và `reconciled` phải là `null`; item, seller, product, category và seller handoff để mảng rỗng.
 
-Các action bổ sung được đặt sau action chính theo thứ tự: `review_seller_handoff` hoặc `review_carrier_delay`, `verify_refund_completion`, `coordinate_multi_seller_case`, `verify_payment_allocation`. `verify_refund_completion` áp dụng cho hai nhánh full-refund (`canceled`/`unavailable`); chỉ thêm `verify_payment_allocation` khi có từ 2 payment row và primary issue không phải `valid_split_payment`, vì action chính của valid split đã giải thích việc phân bổ.
+Các action bổ sung được đặt sau action chính theo thứ tự: `review_seller_handoff` hoặc `review_carrier_delay`, `verify_refund_completion`, `coordinate_multi_seller_case`, `verify_payment_allocation`. Không thêm `verify_payment_allocation` khi primary issue là `valid_split_payment` vì action chính đã giải thích split payment.
 
 ## 5. Evidence ID
 
@@ -233,9 +233,7 @@ Các timestamp giữ nguyên định dạng trong CSV (`YYYY-MM-DD HH:MM:SS`) ho
 
 ## 8. Nộp bài và chấm điểm
 
-Nén folder `output/` thành file zip. Bên trong ZIP phải giữ prefix thư mục và
-chứa đúng 50 JSON từ `output/EC_001.json` đến `output/EC_050.json`; không chứa
-các file lạ khác.
+Nén folder `output/` thành file zip. Zip phải chứa đúng 50 JSON từ `EC_001.json` đến `EC_050.json`; không chứa các file lạ khác
 
 Điểm mỗi case là tổng có trọng số:
 
