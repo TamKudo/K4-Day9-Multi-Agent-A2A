@@ -45,6 +45,11 @@ class AgenticPipelineTests(unittest.TestCase):
             self.assertIn("llm_request", events_by_agent[agent])
             self.assertIn("tool_call", events_by_agent[agent])
             self.assertIn("handoff", events_by_agent[agent])
+        prompts = {call["agent"]: call["instructions"] for call in llm.calls}
+        self.assertIn("chuyên đối soát", prompts["payment"])
+        self.assertIn("sai số 0.10 BRL", prompts["payment"])
+        self.assertIn("<runtime_guardrails", prompts["payment"])
+        self.assertNotEqual(prompts["customer"], prompts["delivery"])
 
     def test_output_writer_calls_llm_and_tool(self):
         llm = FakeToolCallingLLM()

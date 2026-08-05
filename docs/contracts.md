@@ -15,6 +15,9 @@ Production implementation bọc mỗi deterministic domain operation bằng LLM 
 trong `src/agents/llm_agents.py`. Mỗi agent bắt buộc gọi tool đúng domain, nhận
 kết quả tool rồi mới handoff typed result cho Coordinator.
 
+Prompt chuyên biệt được load từ `src/prompts/<agent>.md`. Prompt chỉ mô tả vai
+trò và contract; Python schema/tool/verifier vẫn là authority cuối cùng.
+
 Quy ước:
 
 - ID trung gian bỏ prefix evidence: `item_id` là `<order_id>:<order_item_id>`.

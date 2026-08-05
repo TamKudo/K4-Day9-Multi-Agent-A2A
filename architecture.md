@@ -36,6 +36,11 @@ handoff đến sáu specialist agent và trả `CaseOutput` cho Coordinator trư
 ghi file. `src/llm_runtime.py` là runtime chung; typed contracts nằm tại
 `src/schemas.py` và `docs/contracts.md`.
 
+Mỗi agent có prompt chuyên biệt trong `src/prompts/`. `PromptLoader` bắt buộc đủ
+role, ownership, workflow, input/output contract, guardrails, error handling,
+handoff và completion criteria. Runtime nối thêm hard guardrails không thể bị
+prompt hoặc case data ghi đè; thiết kế chi tiết nằm tại `docs/prompt-design.md`.
+
 ## Vai trò và quyền truy cập
 
 | Thành phần | Đọc | Tạo/Trả về | Không sở hữu |
