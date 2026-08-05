@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Tuple
 from src.agents.coordinator import LLMCoordinatorAgent
 from src.agents.llm_agents import (
     LLMCustomerAgent, LLMDeliveryAgent, LLMOrderProductAgent, LLMPaymentAgent,
-    LLMPolicyAgent, LLMVerifierAgent,
+    LLMOutputWriterAgent, LLMPolicyAgent, LLMVerifierAgent,
 )
 from src.agents.policy import PolicyEngine
 from src.agents.verifier import OutputVerifier
@@ -34,8 +34,8 @@ TRACE_PATH = ROOT / "logging" / "trace.jsonl"
 METADATA_PATH = ROOT / "logging" / "metadata.json"
 
 # Declared in source, never in .env, per the submission rules.
-MODEL_NAME = "gpt-5.6-luna"
-MODEL_PARAMETER_SIZE = "undisclosed"
+MODEL_NAME = "Qwen/Qwen3-8B"
+MODEL_PARAMETER_SIZE = "8B"
 FRAMEWORK = "OpenAI Responses API + Python tools"
 
 
@@ -103,13 +103,24 @@ def run(agents: AgentBundle, cases: List[CaseInput], output_dir: Path,
     failures: List[Tuple[str, Exception]] = []
     with JsonlTrace(trace_path) as trace:
         coordinator = agents.into(trace)
+        output_writer = (
+            LLMOutputWriterAgent(agents.llm, write_output, trace)
+            if agents.llm is not None else None
+        )
         for case in cases:
             try:
                 output = coordinator.process(case)
-            except Exception as exc:  # already traced as case_failed
+                if output_writer is None:  # focused deterministic unit-test path
+                    write_output(output_dir, output)
+                else:
+                    output_writer.write(output_dir, output)
+            except Exception as exc:
+                trace.record(
+                    case.case_id, "coordinator", "case_failed",
+                    error_type=type(exc).__name__, error=str(exc),
+                )
                 failures.append((case.case_id, exc))
                 continue
-            write_output(output_dir, output)
             outputs.append(output)
     return outputs, failures
 

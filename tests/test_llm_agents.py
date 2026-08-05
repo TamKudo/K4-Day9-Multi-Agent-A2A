@@ -1,8 +1,12 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from run import AgentBundle
+from src.agents.llm_agents import LLMOutputWriterAgent
 from src.agents.policy import PolicyEngine
 from src.agents.verifier import OutputVerifier
+from src.io import write_output
 from src.llm_runtime import FakeToolCallingLLM, OpenAIResponsesLLM
 from src.schemas import (
     CaseInput, CustomerRequest, InvestigationScope,
@@ -41,6 +45,23 @@ class AgenticPipelineTests(unittest.TestCase):
             self.assertIn("llm_request", events_by_agent[agent])
             self.assertIn("tool_call", events_by_agent[agent])
             self.assertIn("handoff", events_by_agent[agent])
+
+    def test_output_writer_calls_llm_and_tool(self):
+        llm = FakeToolCallingLLM()
+        trace = MemoryTrace()
+        output = AgentBundle(
+            CustomerStub(), OrderStub(), PaymentStub(), DeliveryStub(),
+            PolicyEngine(), OutputVerifier(), llm,
+        ).into(trace).process(CASE)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = LLMOutputWriterAgent(llm, write_output, trace).write(
+                Path(tmp), output,
+            )
+
+        self.assertEqual("EC_001.json", destination.name)
+        self.assertEqual("output_writer", llm.calls[-1]["agent"])
+        self.assertEqual("write_case_output", llm.calls[-1]["tool"])
 
 
 class ResponsesAdapterTests(unittest.TestCase):

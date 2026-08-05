@@ -73,9 +73,12 @@ class OpenAIResponsesLLM:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY is required for a real agent run")
-        model = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
+        # Kept in source (not .env) so the <=10B lab constraint is auditable.
+        model = "Qwen/Qwen3-8B"
         effort = os.getenv("OPENAI_REASONING_EFFORT", "low")
-        return cls(OpenAI(api_key=api_key), model, effort)
+        base_url = os.getenv("OPENAI_BASE_URL")
+        client = OpenAI(api_key=api_key, **({"base_url": base_url} if base_url else {}))
+        return cls(client, model, effort)
 
     def request_tool(
         self, *, agent_name: str, instructions: str, user_input: str,

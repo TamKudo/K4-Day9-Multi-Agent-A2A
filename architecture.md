@@ -18,8 +18,10 @@ LLM Coordinator Agent
           |-- LLM Policy Agent
           |     `-- tool: apply_ec_policy_v2 -> PolicyResult
           |-- deterministic schema assembler -> CaseOutput
-          `-- LLM Verifier Agent
+          |-- LLM Verifier Agent
                 `-- tool: verify_case_output -> pass/raise
+          `-- LLM Output Writer Agent
+                `-- tool: write_case_output -> EC_NNN.json
    |
 JSON output + JSONL trace
 ```
@@ -45,6 +47,7 @@ ghi file. `src/llm_runtime.py` là runtime chung; typed contracts nằm tại
 | Delivery Agent | delivery tool | `DeliveryResult` | quyết định trách nhiệm |
 | Policy Agent | deterministic policy tool | `PolicyResult` | ghi file output |
 | Verifier Agent | validation tool | pass hoặc raise lỗi | sửa âm thầm output |
+| Output Writer Agent | verified `CaseOutput` | file JSON tương ứng | sửa nội dung output |
 
 ## Handoff và lỗi
 
@@ -56,8 +59,9 @@ log.
 
 ## Runtime
 
-- Production: OpenAI Responses API, model mặc định `gpt-5.6-luna` (có thể đổi
-  bằng `OPENAI_MODEL`), reasoning mặc định `low`.
+- Production: OpenAI-compatible Responses API, model cố định trong source là
+  `Qwen/Qwen3-8B`, reasoning mặc định `low`. Có thể cấu hình endpoint bằng
+  `OPENAI_BASE_URL`; không cấu hình model qua `.env`.
 - Integration: `--fake-llm` dùng dữ liệu/tool thật và LLM test double, không gọi
   mạng; artifact này không thay thế trace chạy LLM thật khi nộp.
 - Mọi production agent dùng cùng một `LLMClient`, model và trace sink.

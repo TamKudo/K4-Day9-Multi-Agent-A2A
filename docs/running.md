@@ -22,7 +22,7 @@ Không commit API key hoặc `.env`:
 
 ```bash
 export OPENAI_API_KEY="..."
-export OPENAI_MODEL="gpt-5.6-luna"
+export OPENAI_BASE_URL="<OpenAI-compatible endpoint serving Qwen/Qwen3-8B>"
 export OPENAI_REASONING_EFFORT="low"
 python3 run.py
 python3 scripts/qa_release.py

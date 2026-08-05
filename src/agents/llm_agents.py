@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from ..llm_runtime import AgentToolInvoker, LLMClient
@@ -82,3 +83,20 @@ class LLMVerifierAgent(_BaseAgent):
             order_id=case.customer_request.claimed_order_id,
         )
 
+
+class LLMOutputWriterAgent(_BaseAgent):
+    """Persist a verified output through an auditable LLM-selected tool."""
+
+    def write(self, output_dir: Path, output: CaseOutput) -> Path:
+        return self.invoker.invoke(
+            case_id=output.case_id,
+            agent_name="output_writer",
+            recipient="filesystem",
+            tool_name="write_case_output",
+            tool_description="Write one verified CaseOutput to its matching JSON file.",
+            expected_arguments={
+                "case_id": output.case_id,
+                "filename": f"{output.case_id}.json",
+            },
+            handler=lambda: self.tool(output_dir, output),
+        )
