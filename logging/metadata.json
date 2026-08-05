@@ -1,0 +1,7 @@
+{
+  "model": "llama-3.1-8b-instant",
+  "parameter_size": "8B",
+  "framework": "OpenAI-compatible Chat Completions + Python tools",
+  "runtime": "python 3.10",
+  "cases": 50
+}
