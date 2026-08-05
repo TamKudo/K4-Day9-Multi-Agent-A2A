@@ -29,6 +29,7 @@ class ToolDecision:
     model: str
     usage: Dict[str, Any] = field(default_factory=dict)
     call_id: str = ""
+    context: Any = None
 
 
 @dataclass(frozen=True)
@@ -67,7 +68,7 @@ class OpenAIResponsesLLM:
         self.reasoning_effort = reasoning_effort
 
     @classmethod
-    def from_env(cls) -> "OpenAIResponsesLLM":
+    def from_env(cls) -> "LLMClient":
         try:
             from openai import OpenAI
         except ImportError as exc:
@@ -80,7 +81,10 @@ class OpenAIResponsesLLM:
         effort = os.getenv("OPENAI_REASONING_EFFORT", "low")
         base_url = os.getenv("OPENAI_BASE_URL")
         client = OpenAI(api_key=api_key, **({"base_url": base_url} if base_url else {}))
-        return cls(client, model, effort)
+        # Hugging Face's Qwen provider currently accepts tool_choice=auto in
+        # Chat Completions, while forced Responses tool selection returns no
+        # function_call items. Application validation below still fails closed.
+        return OpenAIChatCompletionsLLM(client, model)
 
     def request_tool(
         self, *, agent_name: str, instructions: str, user_input: str,
@@ -131,6 +135,81 @@ class OpenAIResponsesLLM:
         )
         usage = response.usage.model_dump() if response.usage is not None else {}
         return AgentCompletion(response.id, response.model, response.output_text, usage)
+
+
+class OpenAIChatCompletionsLLM:
+    """OpenAI-compatible adapter for Qwen providers using tool_choice=auto."""
+
+    def __init__(self, client: Any, model: str) -> None:
+        self._client = client
+        self.model = model
+
+    def request_tool(
+        self, *, agent_name: str, instructions: str, user_input: str,
+        tool_name: str, tool_description: str, parameters: Dict[str, Any],
+    ) -> ToolDecision:
+        messages = [
+            {"role": "system", "content": instructions},
+            # Qwen3 thinking can consume the short routing budget and leave a
+            # truncated textual <tool_call>. Routing is deterministic here, so
+            # disable thinking to obtain the provider-native function call.
+            {"role": "user", "content": user_input + "\n/no_think"},
+        ]
+        response = self._client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": tool_description,
+                    "parameters": parameters,
+                },
+            }],
+            tool_choice="auto",
+            max_tokens=512,
+        )
+        message = response.choices[0].message
+        calls = message.tool_calls or []
+        if len(calls) != 1 or calls[0].function.name != tool_name:
+            raise ContractError(
+                f"{agent_name}: expected one {tool_name} tool call, got {len(calls)}"
+            )
+        try:
+            arguments = json.loads(calls[0].function.arguments)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ContractError(f"{agent_name}: invalid tool arguments") from exc
+        usage = response.usage.model_dump() if response.usage is not None else {}
+        context = messages + [message.model_dump(exclude_none=True)]
+        return ToolDecision(
+            tool_name=tool_name,
+            arguments=arguments,
+            response_id=response.id,
+            model=response.model,
+            usage=usage,
+            call_id=calls[0].id,
+            context=context,
+        )
+
+    def submit_tool_result(
+        self, *, agent_name: str, decision: ToolDecision, result: Any,
+    ) -> AgentCompletion:
+        messages = list(decision.context or [])
+        messages.append({
+            "role": "tool",
+            "tool_call_id": decision.call_id,
+            "content": json.dumps(_jsonable(result), ensure_ascii=False),
+        })
+        response = self._client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            max_tokens=256,
+        )
+        message = response.choices[0].message
+        usage = response.usage.model_dump() if response.usage is not None else {}
+        return AgentCompletion(
+            response.id, response.model, message.content or "", usage,
+        )
 
 
 class FakeToolCallingLLM:

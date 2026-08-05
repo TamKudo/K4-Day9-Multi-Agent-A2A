@@ -64,9 +64,11 @@ log.
 
 ## Runtime
 
-- Production: OpenAI-compatible Responses API, model cố định trong source là
-  `Qwen/Qwen3-8B`, reasoning mặc định `low`. Có thể cấu hình endpoint bằng
-  `OPENAI_BASE_URL`; không cấu hình model qua `.env`.
+- Production: OpenAI-compatible Chat Completions, model cố định trong source là
+  `Qwen/Qwen3-8B`. Provider dùng `tool_choice=auto`; runtime vẫn fail-closed nếu
+  model không gọi đúng tool hoặc thay protected arguments. Endpoint được cấu
+  hình bằng `OPENAI_BASE_URL`; không cấu hình model qua `.env`. Routing dùng
+  `/no_think` để Qwen không tiêu hết token trước khi phát function call.
 - Integration: `--fake-llm` dùng dữ liệu/tool thật và LLM test double, không gọi
   mạng; artifact này không thay thế trace chạy LLM thật khi nộp.
 - Mọi production agent dùng cùng một `LLMClient`, model và trace sink.

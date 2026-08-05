@@ -36,7 +36,7 @@ METADATA_PATH = ROOT / "logging" / "metadata.json"
 # Declared in source, never in .env, per the submission rules.
 MODEL_NAME = "Qwen/Qwen3-8B"
 MODEL_PARAMETER_SIZE = "8B"
-FRAMEWORK = "OpenAI Responses API + Python tools"
+FRAMEWORK = "OpenAI-compatible Chat Completions + Python tools"
 
 
 @dataclass
