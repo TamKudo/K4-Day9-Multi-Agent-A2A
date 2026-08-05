@@ -34,7 +34,7 @@ TRACE_PATH = ROOT / "logging" / "trace.jsonl"
 METADATA_PATH = ROOT / "logging" / "metadata.json"
 
 # Declared in source, never in .env, per the submission rules.
-MODEL_NAME = "Qwen/Qwen3-8B"
+MODEL_NAME = "llama-3.1-8b-instant"
 MODEL_PARAMETER_SIZE = "8B"
 FRAMEWORK = "OpenAI-compatible Chat Completions + Python tools"
 
@@ -130,7 +130,7 @@ def write_metadata(
 ) -> None:
     payload: Dict[str, Any] = {
         "model": model,
-        "parameter_size": MODEL_PARAMETER_SIZE,
+        "parameter_size": _parameter_size(model),
         "framework": FRAMEWORK,
         "runtime": runtime,
         "cases": case_count,
@@ -138,6 +138,15 @@ def write_metadata(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
                     encoding="utf-8")
+
+
+def _parameter_size(model: str) -> str:
+    """Return auditable metadata for the two supported <=10B models."""
+    if model in {"llama-3.1-8b-instant", "Qwen/Qwen3-8B"}:
+        return "8B"
+    if model == "fake-tool-calling-llm":
+        return "test-double"
+    raise ValueError(f"model parameter size is not declared for: {model}")
 
 
 def main(argv: List[str]) -> int:

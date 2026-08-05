@@ -52,8 +52,8 @@ class PrimaryIssueTests(unittest.TestCase):
 
         self.assertIs(PrimaryIssue.CANCELED_ORDER_PAID, result.primary_issue)
         self.assertEqual(212.27, result.recommended_refund_brl)
-        self.assertEqual(["issue_full_refund", "verify_refund_completion",
-                          "verify_payment_allocation"], result.resolution_actions)
+        self.assertEqual(["issue_full_refund", "verify_refund_completion"],
+                         result.resolution_actions)
         self.assertEqual(PartyType.PLATFORM, result.responsible_parties[0].party_type)
         self.assertEqual("OLIST_PLATFORM", result.responsible_parties[0].party_id)
 
@@ -67,15 +67,13 @@ class PrimaryIssueTests(unittest.TestCase):
                       result.ranked_causes[0].cause_code)
 
     def test_canceled_order_without_payment_is_not_refundable(self):
-        result = self.engine.evaluate(
-            CASE, NO_HISTORY, order(status="canceled"),
-            payment(ids=[], total=0.0, expected=None, difference=None, reconciled=None,
-                    types=[]),
-            delivery(),
-        )
-
-        self.assertIsNot(PrimaryIssue.CANCELED_ORDER_PAID, result.primary_issue)
-        self.assertEqual(0.0, result.recommended_refund_brl)
+        with self.assertRaisesRegex(ContractError, "does not match any"):
+            self.engine.evaluate(
+                CASE, NO_HISTORY, order(status="canceled"),
+                payment(ids=[], total=0.0, expected=212.27, difference=-212.27,
+                        reconciled=False, types=[]),
+                delivery(),
+            )
 
     def test_late_delivery_blames_seller_when_handoff_is_late(self):
         result = self.engine.evaluate(
@@ -87,10 +85,10 @@ class PrimaryIssueTests(unittest.TestCase):
         self.assertEqual(18.27, result.recommended_refund_brl)
         self.assertIs(RootCauseCode.SELLER_HANDOFF_AFTER_LIMIT,
                       result.ranked_causes[0].cause_code)
+        self.assertEqual(0.92, result.confidence)
         self.assertEqual([(PartyType.SELLER, "seller-1")],
                          [(p.party_type, p.party_id) for p in result.responsible_parties])
-        self.assertEqual(["refund_freight", "review_seller_handoff",
-                          "verify_refund_completion", "verify_payment_allocation"],
+        self.assertEqual(["refund_freight", "review_seller_handoff"],
                          result.resolution_actions)
 
     def test_late_delivery_blames_logistics_when_no_seller_is_late(self):
@@ -119,13 +117,13 @@ class PrimaryIssueTests(unittest.TestCase):
         self.assertEqual(["explain_valid_split_payment"], result.resolution_actions)
 
     def test_split_payment_that_does_not_reconcile_falls_through(self):
-        result = self.engine.evaluate(
-            CASE, NO_HISTORY, order(),
-            payment(ids=["order-1:1", "order-1:2"], difference=5.0, reconciled=False),
-            delivery(variance=-24.0),
-        )
-
-        self.assertIs(PrimaryIssue.UNSUPPORTED_LATE_CLAIM, result.primary_issue)
+        with self.assertRaisesRegex(ContractError, "does not match any"):
+            self.engine.evaluate(
+                CASE, NO_HISTORY, order(),
+                payment(ids=["order-1:1", "order-1:2"], difference=5.0,
+                        reconciled=False),
+                delivery(variance=-24.0),
+            )
 
     def test_unsupported_late_claim_when_delivered_within_estimate(self):
         result = self.engine.evaluate(
@@ -137,8 +135,7 @@ class PrimaryIssueTests(unittest.TestCase):
         self.assertIs(RootCauseCode.DELIVERY_WITHIN_ESTIMATE,
                       result.ranked_causes[0].cause_code)
         self.assertEqual([], result.responsible_parties)
-        self.assertEqual(["reject_late_refund", "verify_payment_allocation"],
-                         result.resolution_actions)
+        self.assertEqual(["reject_late_refund"], result.resolution_actions)
 
     def test_zero_variance_is_not_late(self):
         result = self.engine.evaluate(
@@ -191,16 +188,14 @@ class EdgeCaseTests(unittest.TestCase):
         self.engine = PolicyEngine()
 
     def test_order_without_items_uses_null_reconciliation(self):
-        result = self.engine.evaluate(
-            CASE, NO_HISTORY,
-            order(items=[], sellers=[], categories=[], item_total=None, freight=None),
-            payment(ids=[], total=0.0, expected=None, difference=None, reconciled=None,
-                    types=[]),
-            delivery(variance=None, handoff_at=None),
-        )
-
-        self.assertIs(PrimaryIssue.UNSUPPORTED_LATE_CLAIM, result.primary_issue)
-        self.assertEqual(0.0, result.recommended_refund_brl)
+        with self.assertRaisesRegex(ContractError, "does not match any"):
+            self.engine.evaluate(
+                CASE, NO_HISTORY,
+                order(items=[], sellers=[], categories=[], item_total=None, freight=None),
+                payment(ids=[], total=0.0, expected=None, difference=None,
+                        reconciled=None, types=[]),
+                delivery(variance=None, handoff_at=None),
+            )
 
     def test_late_delivery_without_freight_refunds_zero(self):
         result = self.engine.evaluate(
@@ -223,23 +218,40 @@ class EdgeCaseTests(unittest.TestCase):
 
     def test_actions_capped_at_five(self):
         result = self.engine.evaluate(
-            CASE, NO_HISTORY, order(sellers=["seller-1", "seller-2"]), payment(),
+            CASE, NO_HISTORY, order(sellers=["seller-1", "seller-2"]),
+            payment(ids=["order-1:1", "order-1:2"]),
             delivery(variance=10.0, late_sellers=["seller-1"]),
         )
 
         self.assertEqual(
-            ["refund_freight", "review_seller_handoff", "verify_refund_completion",
+            ["refund_freight", "review_seller_handoff",
              "coordinate_multi_seller_case", "verify_payment_allocation"],
             result.resolution_actions,
         )
 
     def test_confidence_stays_within_range(self):
         result = self.engine.evaluate(
-            CASE, NO_HISTORY, order(), payment(reconciled=None), delivery(variance=None),
+            CASE, NO_HISTORY, order(), payment(reconciled=False),
+            delivery(variance=10.0),
         )
 
         self.assertGreaterEqual(result.confidence, 0.0)
         self.assertLessEqual(result.confidence, 1.0)
+
+    def test_rejects_policy_handoff_for_another_order(self):
+        with self.assertRaisesRegex(ContractError, "does not match claimed order"):
+            self.engine.evaluate(
+                CASE, NO_HISTORY,
+                OrderProductResult("other-order", "delivered"),
+                payment(), delivery(variance=-24.0),
+            )
+
+    def test_rejects_unknown_late_seller(self):
+        with self.assertRaisesRegex(ContractError, "outside the order"):
+            self.engine.evaluate(
+                CASE, NO_HISTORY, order(), payment(),
+                delivery(variance=10.0, late_sellers=["other-seller"]),
+            )
 
     def test_rejects_unknown_policy_version(self):
         case = CaseInput(

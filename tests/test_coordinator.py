@@ -91,8 +91,9 @@ class CoordinatorTests(unittest.TestCase):
              "seller:seller-1", "policy:SELLER_HANDOFF_AFTER_LIMIT"],
             output["evidence_ids"],
         )
-        self.assertEqual(("coordinator", "case_started", {}), trace.events[0])
-        self.assertEqual(("coordinator", "case_completed", {}), trace.events[-1])
+        # Deterministic coordinator plumbing is intentionally not logged;
+        # production LLM wrappers emit one compact agent_step each.
+        self.assertEqual([], trace.events)
 
 
 if __name__ == "__main__":

@@ -46,7 +46,8 @@ refund không âm và tối đa 5 actions.
 - Không đổi thứ tự primary, secondary hoặc actions.
 - Không tạo root-cause code, party type hoặc action ngoài taxonomy.
 - Không hoàn tiền ngoài tổng payment hoặc freight do policy quy định.
-- Không thêm `verify_payment_allocation` cho valid split payment.
+- Chỉ thêm `verify_payment_allocation` khi có từ 2 payment row và primary issue
+  không phải valid split payment.
 - Không truy cập raw CSV hoặc tự sửa domain result.
 
 # Missing data and errors
@@ -63,4 +64,3 @@ và không bỏ qua Verifier Agent.
 
 Tool chạy đúng một lần, policy order/taxonomy/refund/actions hợp lệ và typed
 handoff hoàn tất.
-

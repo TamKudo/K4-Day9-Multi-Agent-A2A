@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 EXPECTED = [f"EC_{number:03d}.json" for number in range(1, 51)]
+EXPECTED_ARCHIVE = [f"output/{name}" for name in EXPECTED]
 
 
 def validate_output_dir(output_dir: Path) -> None:
@@ -27,9 +28,9 @@ def create_zip(output_dir: Path, destination: Path) -> None:
     validate_output_dir(output_dir)
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name in EXPECTED:
-            archive.write(output_dir / name, arcname=name)
+            archive.write(output_dir / name, arcname=f"output/{name}")
     with zipfile.ZipFile(destination) as archive:
-        if sorted(archive.namelist()) != EXPECTED:
+        if sorted(archive.namelist()) != EXPECTED_ARCHIVE:
             raise ValueError("ZIP content validation failed")
 
 

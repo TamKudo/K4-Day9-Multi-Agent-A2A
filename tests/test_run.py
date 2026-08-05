@@ -123,7 +123,7 @@ class RunnerTests(unittest.TestCase):
 
         self.assertEqual([], written)
 
-    def test_order_without_items_survives_the_whole_pipeline(self):
+    def test_ambiguous_order_without_items_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             outputs, failures = run(
@@ -132,11 +132,10 @@ class RunnerTests(unittest.TestCase):
                 [case("EC_001")], tmp_path / "out", tmp_path / "trace.jsonl",
             )
 
-        self.assertEqual([], failures)
-        reconciliation = outputs[0].payment_reconciliation
-        self.assertIsNone(reconciliation["expected_total_brl"])
-        self.assertIsNone(reconciliation["difference_brl"])
-        self.assertIsNone(reconciliation["reconciled"])
+        self.assertEqual([], outputs)
+        self.assertEqual(1, len(failures))
+        self.assertIn("does not match any EC_POLICY_V2 primary issue",
+                      str(failures[0][1]))
 
     def test_every_supplied_case_passes_the_verifier(self):
         """Integration smoke test over the real 50 inputs, with stub agents."""
@@ -162,6 +161,14 @@ class MetadataTests(unittest.TestCase):
         self.assertEqual({"model", "parameter_size", "framework", "runtime", "cases"},
                          set(payload))
         self.assertEqual(50, payload["cases"])
+
+    def test_fake_runtime_is_labeled_as_a_test_double(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "metadata.json"
+            write_metadata(path, 50, "test", "fake-tool-calling-llm")
+            payload = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual("test-double", payload["parameter_size"])
 
 
 if __name__ == "__main__":

@@ -44,9 +44,14 @@ class AgenticPipelineTests(unittest.TestCase):
         for event in trace.events:
             events_by_agent.setdefault(event["agent"], set()).add(event["event"])
         for agent in expected:
-            self.assertIn("llm_request", events_by_agent[agent])
-            self.assertIn("tool_call", events_by_agent[agent])
-            self.assertIn("handoff", events_by_agent[agent])
+            self.assertEqual({"agent_step"}, events_by_agent[agent])
+        for event in trace.events:
+            details = event["details"]
+            self.assertIn("model", details)
+            self.assertIn("response_id", details)
+            self.assertIn("tool", details)
+            self.assertIn("arguments", details)
+            self.assertIn("to", details)
         prompts = {call["agent"]: call["instructions"] for call in llm.calls}
         self.assertIn("chuyên đối soát", prompts["payment"])
         self.assertIn("sai số 0.10 BRL", prompts["payment"])
@@ -69,6 +74,7 @@ class AgenticPipelineTests(unittest.TestCase):
         self.assertEqual("EC_001.json", destination.name)
         self.assertEqual("output_writer", llm.calls[-1]["agent"])
         self.assertEqual("write_case_output", llm.calls[-1]["tool"])
+        self.assertEqual("agent_step", trace.events[-1]["event"])
 
 
 class ResponsesAdapterTests(unittest.TestCase):
@@ -202,6 +208,105 @@ class ChatCompletionsAdapterTests(unittest.TestCase):
         self.assertEqual("lookup_order", first["tools"][0]["function"]["name"])
         self.assertEqual("tool", second["messages"][-1]["role"])
         self.assertEqual("handoff complete", completion.text)
+
+    def test_provider_validation_can_be_delegated_to_fail_closed_runtime(self):
+        class Function:
+            name = "lookup_order"
+            arguments = '{"order_id":"order-1"}'
+
+        tool_call = type("ToolCall", (), {"id": "call-1", "function": Function()})()
+        message = type("Message", (), {
+            "tool_calls": [tool_call], "content": None,
+            "model_dump": lambda self, exclude_none=True: {
+                "role": "assistant", "tool_calls": [{
+                    "id": "call-1", "type": "function",
+                    "function": {"name": "lookup_order", "arguments":
+                                 '{"order_id":"order-1"}'},
+                }],
+            },
+        })()
+        response = type("Response", (), {
+            "id": "chat-1", "model": "llama-test", "usage": None,
+            "choices": [type("Choice", (), {"message": message})()],
+        })()
+
+        class Completions:
+            def __init__(self):
+                self.kwargs = None
+
+            def create(self, **kwargs):
+                self.kwargs = kwargs
+                return response
+
+        completions = Completions()
+        client = type("Client", (), {
+            "chat": type("Chat", (), {"completions": completions})(),
+        })()
+        llm = OpenAIChatCompletionsLLM(
+            client, "llama-test", tool_choice="required",
+            disable_provider_tool_validation=True,
+        )
+        schema = {
+            "type": "object", "properties": {"order_id": {"type": "string"}},
+            "required": ["order_id"], "additionalProperties": False,
+        }
+
+        llm.request_tool(
+            agent_name="order", instructions="call tool",
+            user_input='{"order_id":"order-1"}', tool_name="lookup_order",
+            tool_description="lookup", parameters=schema,
+        )
+
+        self.assertEqual("required", completions.kwargs["tool_choice"])
+        self.assertEqual(
+            {"disable_tool_validation": True}, completions.kwargs["extra_body"],
+        )
+
+    def test_specific_choice_forces_the_declared_domain_tool(self):
+        class Function:
+            name = "lookup_order"
+            arguments = '{"order_id":"order-1"}'
+
+        call = type("ToolCall", (), {"id": "call-1", "function": Function()})()
+        message = type("Message", (), {
+            "tool_calls": [call], "content": None,
+            "model_dump": lambda self, exclude_none=True: {
+                "role": "assistant", "tool_calls": [],
+            },
+        })()
+        response = type("Response", (), {
+            "id": "chat-1", "model": "llama-test", "usage": None,
+            "choices": [type("Choice", (), {"message": message})()],
+        })()
+
+        class Completions:
+            def create(self, **kwargs):
+                self.kwargs = kwargs
+                return response
+
+        completions = Completions()
+        client = type("Client", (), {
+            "chat": type("Chat", (), {"completions": completions})(),
+        })()
+        llm = OpenAIChatCompletionsLLM(
+            client, "llama-test", tool_choice="specific",
+        )
+
+        llm.request_tool(
+            agent_name="order", instructions="call tool",
+            user_input='{"order_id":"order-1"}', tool_name="lookup_order",
+            tool_description="lookup", parameters={
+                "type": "object",
+                "properties": {"order_id": {"type": "string"}},
+                "required": ["order_id"], "additionalProperties": False,
+            },
+        )
+
+        self.assertEqual(
+            {"type": "function", "function": {"name": "lookup_order"}},
+            completions.kwargs["tool_choice"],
+        )
+        self.assertEqual(96, completions.kwargs["max_tokens"])
 
 
 if __name__ == "__main__":

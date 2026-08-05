@@ -23,7 +23,9 @@ class OlistPaymentAgent:
     def investigate(self, case: CaseInput, order: OrderProductResult) -> PaymentResult:
         payments = self._repository.get_payments_by_order(order.order_id)
         payment_ids = [f"{order.order_id}:{row['payment_sequential']}" for row in payments]
-        payment_types = [str(row["payment_type"]) for row in payments]
+        # Describe methods used, not one entry per payment row. Preserve the
+        # first-seen CSV order while removing repeated methods.
+        payment_types = list(dict.fromkeys(str(row["payment_type"]) for row in payments))
         payment_total = _round_brl(sum((_decimal(row["payment_value"]) for row in payments), Decimal()))
 
         # The policy explicitly defines reconciliation as unavailable when no
