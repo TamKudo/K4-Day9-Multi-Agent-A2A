@@ -132,8 +132,16 @@ def _evidence_ids(
     order: OrderProductResult, payment: PaymentResult, policy: PolicyResult
 ) -> List[str]:
     evidence = [f"order:{order.order_id}"]
-    evidence.extend(f"item:{item_id}" for item_id in order.item_ids)
-    evidence.extend(f"payment:{payment_id}" for payment_id in payment.payment_ids)
-    evidence.extend(f"seller:{party.party_id}" for party in policy.responsible_parties if party.party_type.value == "seller")
-    evidence.extend(f"policy:{cause.cause_code.value}" for cause in policy.ranked_causes)
+    # Mirror affected-entity limits before the global 20-evidence cap so a
+    # large order can never crowd out responsible seller or policy evidence.
+    evidence.extend(f"item:{item_id}" for item_id in order.item_ids[:5])
+    evidence.extend(f"payment:{payment_id}" for payment_id in payment.payment_ids[:5])
+    evidence.extend(
+        f"seller:{party.party_id}"
+        for party in policy.responsible_parties[:3]
+        if party.party_type.value == "seller"
+    )
+    evidence.extend(
+        f"policy:{cause.cause_code.value}" for cause in policy.ranked_causes[:3]
+    )
     return evidence
