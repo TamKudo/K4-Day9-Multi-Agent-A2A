@@ -22,10 +22,7 @@ from src.customer_agent import CustomerAgent as CustomerTool
 from src.data_repository import DataRepository
 from src.delivery_agent import OlistDeliveryAgent
 from src.io import load_cases, write_output
-from src.llm_runtime import (
-    MODEL_NAME as LLM_MODEL_NAME, MODEL_PARAMETER_SIZE as LLM_PARAMETER_SIZE,
-    ChatCompletionsLLM, FakeToolCallingLLM, LLMClient,
-)
+from src.llm_runtime import FakeToolCallingLLM, LLMClient, OpenAIResponsesLLM
 from src.order_product_agent import OlistOrderProductAgent
 from src.payment_agent import OlistPaymentAgent
 from src.schemas import CaseInput, CaseOutput
@@ -38,10 +35,9 @@ TRACE_PATH = ROOT / "logging" / "trace.jsonl"
 METADATA_PATH = ROOT / "logging" / "metadata.json"
 
 # Declared in source, never in .env, per the submission rules.
-MODEL_NAME = LLM_MODEL_NAME
-MODEL_PARAMETER_SIZE = LLM_PARAMETER_SIZE
-DEFAULT_WORKERS = 6
-FRAMEWORK = "OpenRouter Chat Completions API + Python tools"
+MODEL_NAME = "qwen/qwen3-8b"
+DEFAULT_WORKERS = 4
+FRAMEWORK = "OpenAI-compatible Chat Completions + Python tools"
 
 
 @dataclass
@@ -93,7 +89,7 @@ def build_agents(use_stubs: bool, fake_llm: bool = False) -> AgentBundle:
         )
 
     repository = DataRepository(ROOT / "data")
-    llm: LLMClient = FakeToolCallingLLM() if fake_llm else ChatCompletionsLLM.from_env()
+    llm: LLMClient = FakeToolCallingLLM() if fake_llm else OpenAIResponsesLLM.from_env()
     return AgentBundle(
         CustomerTool(repository), OlistOrderProductAgent(repository),
         OlistPaymentAgent(repository), OlistDeliveryAgent(repository), policy,
@@ -150,7 +146,7 @@ def write_metadata(
 ) -> None:
     payload: Dict[str, Any] = {
         "model": model,
-        "parameter_size": MODEL_PARAMETER_SIZE,
+        "parameter_size": _parameter_size(model),
         "framework": FRAMEWORK,
         "runtime": runtime,
         "cases": case_count,
@@ -158,6 +154,15 @@ def write_metadata(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
                     encoding="utf-8")
+
+
+def _parameter_size(model: str) -> str:
+    """Return auditable metadata for the two supported <=10B models."""
+    if model.lower() in {"llama-3.1-8b-instant", "qwen/qwen3-8b"}:
+        return "8B"
+    if model == "fake-tool-calling-llm":
+        return "test-double"
+    raise ValueError(f"model parameter size is not declared for: {model}")
 
 
 def main(argv: List[str]) -> int:

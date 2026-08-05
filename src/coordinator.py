@@ -25,33 +25,18 @@ class Coordinator:
 
     def process(self, case: CaseInput) -> CaseOutput:
         """Run one case, perform explicit handoffs, verify, and return output."""
-        self.trace.record(case.case_id, "coordinator", "case_started")
-        try:
-            customer = self._call(case, "customer", self.customer_agent.investigate)
-            order = self._call(case, "order_product", self.order_product_agent.investigate)
-            payment = self._call(case, "payment", self.payment_agent.investigate, order)
-            delivery = self._call(case, "delivery", self.delivery_agent.investigate, order)
-            self.trace.record(case.case_id, "coordinator", "handoff", to="policy")
-            policy = self.policy_agent.evaluate(case, customer, order, payment, delivery)
-            self.trace.record(case.case_id, "policy", "completed")
-            output = assemble_output(case, customer, order, payment, delivery, policy)
-            output.validate_limits()
-            self.verifier_agent.verify(case, output)
-            self.trace.record(case.case_id, "verifier", "validation_passed")
-            self.trace.record(case.case_id, "coordinator", "case_completed")
-            return output
-        except Exception as exc:
-            self.trace.record(
-                case.case_id, "coordinator", "case_failed",
-                error_type=type(exc).__name__, error=str(exc),
-            )
-            raise
+        customer = self._call(case, "customer", self.customer_agent.investigate)
+        order = self._call(case, "order_product", self.order_product_agent.investigate)
+        payment = self._call(case, "payment", self.payment_agent.investigate, order)
+        delivery = self._call(case, "delivery", self.delivery_agent.investigate, order)
+        policy = self.policy_agent.evaluate(case, customer, order, payment, delivery)
+        output = assemble_output(case, customer, order, payment, delivery, policy)
+        output.validate_limits()
+        self.verifier_agent.verify(case, output)
+        return output
 
     def _call(self, case: CaseInput, name: str, function, *args):
-        self.trace.record(case.case_id, "coordinator", "handoff", to=name)
-        result = function(case, *args)
-        self.trace.record(case.case_id, name, "completed")
-        return result
+        return function(case, *args)
 
 
 def assemble_output(

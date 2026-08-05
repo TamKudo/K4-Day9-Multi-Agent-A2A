@@ -33,6 +33,21 @@ class PaymentAgentTests(unittest.TestCase):
 
         self.assertEqual(["order-1:1", "order-1:2"], result.payment_ids)
         self.assertEqual(["credit_card", "voucher"], result.payment_types)
+
+    def test_payment_types_are_unique_in_first_seen_order(self):
+        repository = PaymentRepositoryFake([
+            {"payment_sequential": 1, "payment_type": "voucher", "payment_value": "10"},
+            {"payment_sequential": 2, "payment_type": "credit_card", "payment_value": "190"},
+            {"payment_sequential": 3, "payment_type": "voucher", "payment_value": "12.27"},
+        ])
+
+        order = OrderProductResult(
+            "order-1", "delivered", item_total_brl=194.0,
+            freight_total_brl=18.27,
+        )
+        result = OlistPaymentAgent(repository).investigate(CASE, order)
+
+        self.assertEqual(["voucher", "credit_card"], result.payment_types)
         self.assertEqual(212.27, result.payment_total_brl)
         self.assertEqual(212.27, result.expected_total_brl)
         self.assertEqual(0.0, result.difference_brl)

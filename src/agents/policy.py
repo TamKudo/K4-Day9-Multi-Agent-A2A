@@ -61,12 +61,13 @@ class PolicyEngine:
     ) -> PolicyResult:
         if case.policy_version != "EC_POLICY_V2":
             raise ContractError(f"unsupported policy version: {case.policy_version}")
+        self._validate_inputs(case, order, payment, delivery)
 
         primary = self._primary_issue(order, payment, delivery)
         parties = self._responsible_parties(primary, delivery)
         refund = self._refund(primary, order, payment)
         secondary = self._secondary_issues(customer, order, payment)
-        actions = self._actions(primary, order, refund)
+        actions = self._actions(primary, order, payment, refund)
         status = (
             CaseStatus.ACTION_REQUIRED if refund > 0 else CaseStatus.NO_ACTION
         )
@@ -100,14 +101,67 @@ class PolicyEngine:
                 return PrimaryIssue.LATE_DELIVERY_SELLER
             return PrimaryIssue.LATE_DELIVERY_LOGISTICS
 
-        if len(payment.payment_ids) >= 2 and payment.reconciled:
+        if len(payment.payment_ids) >= 2 and payment.reconciled is True:
             return PrimaryIssue.VALID_SPLIT_PAYMENT
-        return PrimaryIssue.UNSUPPORTED_LATE_CLAIM
+        if self._delivered_on_time(delivery) and payment.reconciled is True:
+            return PrimaryIssue.UNSUPPORTED_LATE_CLAIM
+
+        # EC_POLICY_V2 does not define a catch-all issue. Returning
+        # unsupported_late_claim here would falsely assert both on-time
+        # delivery and a reconciled payment when either fact is absent/false.
+        raise ContractError(
+            "case does not match any EC_POLICY_V2 primary issue: "
+            f"status={order.order_status!r}, paid={paid}, "
+            f"delivery_variance_hours={delivery.delivery_variance_hours!r}, "
+            f"payment_rows={len(payment.payment_ids)}, "
+            f"reconciled={payment.reconciled!r}"
+        )
 
     @staticmethod
     def _delivered_late(delivery: DeliveryResult) -> bool:
         variance = delivery.delivery_variance_hours
         return variance is not None and variance > 0
+
+    @staticmethod
+    def _delivered_on_time(delivery: DeliveryResult) -> bool:
+        variance = delivery.delivery_variance_hours
+        return variance is not None and variance <= 0
+
+    @staticmethod
+    def _validate_inputs(
+        case: CaseInput,
+        order: OrderProductResult,
+        payment: PaymentResult,
+        delivery: DeliveryResult,
+    ) -> None:
+        """Reject contradictory domain handoffs before applying policy."""
+        claimed = case.customer_request.claimed_order_id
+        if order.order_id != claimed:
+            raise ContractError(
+                f"policy order_id {order.order_id!r} does not match claimed order {claimed!r}"
+            )
+        if payment.payment_total_brl < 0:
+            raise ContractError("payment_total_brl must not be negative")
+        unknown_late_sellers = [
+            seller_id for seller_id in delivery.late_handoff_seller_ids
+            if seller_id not in order.seller_ids
+        ]
+        if unknown_late_sellers:
+            raise ContractError(
+                f"late handoff sellers are outside the order: {unknown_late_sellers}"
+            )
+        if not order.item_ids:
+            item_dependent = (
+                order.item_total_brl, order.freight_total_brl,
+                payment.expected_total_brl, payment.difference_brl,
+                payment.reconciled,
+            )
+            if any(value is not None for value in item_dependent):
+                raise ContractError(
+                    "orders without item rows require null item-dependent totals and reconciliation"
+                )
+        elif payment.reconciled is None:
+            raise ContractError("orders with item rows require a boolean reconciled value")
 
     def _secondary_issues(
         self,
@@ -170,19 +224,24 @@ class PolicyEngine:
 
     # -- actions ----------------------------------------------------------
     def _actions(
-        self, primary: PrimaryIssue, order: OrderProductResult, refund: float
+        self, primary: PrimaryIssue, order: OrderProductResult,
+        payment: PaymentResult, refund: float,
     ) -> List[str]:
         actions = [PRIMARY_ACTIONS[primary]]
         if primary is PrimaryIssue.LATE_DELIVERY_SELLER:
             actions.append(FOLLOW_UP_SELLER)
         elif primary is PrimaryIssue.LATE_DELIVERY_LOGISTICS:
             actions.append(FOLLOW_UP_CARRIER)
-        if refund > 0:
+        if primary in (
+            PrimaryIssue.CANCELED_ORDER_PAID,
+            PrimaryIssue.UNAVAILABLE_ORDER_PAID,
+        ):
             actions.append(FOLLOW_UP_REFUND)
         if len(set(order.seller_ids)) >= 2:
             actions.append(FOLLOW_UP_MULTI_SELLER)
-        # The primary action already explains a valid split payment.
-        if primary is not PrimaryIssue.VALID_SPLIT_PAYMENT:
+        # Only a split payment needs allocation verification. The valid-split
+        # primary action already explains the reconciled allocation.
+        if len(payment.payment_ids) >= 2 and primary is not PrimaryIssue.VALID_SPLIT_PAYMENT:
             actions.append(FOLLOW_UP_PAYMENT)
         return actions[:MAX_ACTIONS]
 
@@ -192,7 +251,7 @@ class PolicyEngine:
         primary: PrimaryIssue, payment: PaymentResult, delivery: DeliveryResult
     ) -> float:
         """Lower the score when the supporting evidence is incomplete."""
-        score = 0.95
+        score = 0.92 if primary is PrimaryIssue.LATE_DELIVERY_SELLER else 0.95
         if payment.reconciled is None:
             score -= 0.10
         elif not payment.reconciled:

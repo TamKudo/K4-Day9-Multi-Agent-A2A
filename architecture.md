@@ -26,8 +26,8 @@ LLM Coordinator Agent
 JSON output + JSONL trace
 ```
 
-Mỗi agent production đều thực hiện hai lượt LLM: lượt đầu bắt buộc chọn đúng
-domain tool bằng function calling, lượt sau nhận tool result và hoàn tất handoff.
+Mỗi agent production thực hiện một lượt LLM để bắt buộc chọn đúng domain tool
+bằng function calling; runtime chạy tool rồi handoff typed result trực tiếp.
 Phép join, cộng tiền, tính giờ, policy và validation vẫn nằm trong Python tool để
 kết quả chính xác và tái lập được. LLM không được tự sửa ID hoặc số liệu tool.
 
@@ -56,17 +56,23 @@ prompt hoặc case data ghi đè; thiết kế chi tiết nằm tại `docs/prom
 
 ## Handoff và lỗi
 
-Mỗi handoff dùng dataclass được type hóa. Trace ghi `llm_request`, `llm_response`,
-`tool_call`, `tool_result` và `handoff` cho từng agent. Coordinator còn ghi
-`case_started`, `case_completed` hoặc `case_failed`. Output chưa qua Verifier
+Mỗi agent gọi LLM đúng một lần để chọn domain tool; sau khi local tool chạy,
+typed result được handoff trực tiếp, không tốn thêm một lượt LLM chỉ để xác nhận.
+Trace thành công được gộp thành đúng một event `agent_step` cho mỗi agent/case,
+chứa model, response ID, prompt file, tool, protected arguments, token usage và
+đích handoff. Chỉ lỗi mới sinh thêm `agent_error`/`case_failed`. Output chưa qua Verifier
 không được coi là hợp lệ. Trace không ghi API key và không đẩy toàn bộ CSV vào
 log.
 
 ## Runtime
 
-- Production: OpenAI-compatible Responses API, model cố định trong source là
-  `Qwen/Qwen3-8B`, reasoning mặc định `low`. Có thể cấu hình endpoint bằng
-  `OPENAI_BASE_URL`; không cấu hình model qua `.env`.
+- Production ưu tiên Groq qua OpenAI-compatible Chat Completions, model cố định
+  trong source là `llama-3.1-8b-instant` (8B) và ép đích danh domain tool của
+  từng agent qua `tool_choice`.
+  Runtime vẫn fail-closed nếu model không gọi đúng tool hoặc thay protected
+  arguments. Hugging Face `Qwen/Qwen3-8B` còn là fallback bằng
+  `OPENAI_API_KEY` + `OPENAI_BASE_URL`; riêng fallback này dùng
+  `tool_choice=auto` và `/no_think`.
 - Integration: `--fake-llm` dùng dữ liệu/tool thật và LLM test double, không gọi
   mạng; artifact này không thay thế trace chạy LLM thật khi nộp.
 - Mọi production agent dùng cùng một `LLMClient`, model và trace sink.

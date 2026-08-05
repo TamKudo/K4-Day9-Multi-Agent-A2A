@@ -63,8 +63,9 @@ class CoordinatorTests(unittest.TestCase):
              "seller:seller-1", "policy:SELLER_HANDOFF_AFTER_LIMIT"],
             output["evidence_ids"],
         )
-        self.assertEqual(("coordinator", "case_started", {}), trace.events[0])
-        self.assertEqual(("coordinator", "case_completed", {}), trace.events[-1])
+        # Deterministic coordinator plumbing is intentionally not logged;
+        # production LLM wrappers emit one compact agent_step each.
+        self.assertEqual([], trace.events)
 
     def test_evidence_covers_every_seller_not_just_the_responsible_one(self):
         """A logistics verdict still rests on who shipped the order."""

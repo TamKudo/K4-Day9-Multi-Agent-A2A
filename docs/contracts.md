@@ -12,8 +12,9 @@
 | Verifier | `CaseInput`, `CaseOutput` | không trả dữ liệu; raise lỗi nếu sai |
 
 Production implementation bọc mỗi deterministic domain operation bằng LLM agent
-trong `src/agents/llm_agents.py`. Mỗi agent bắt buộc gọi tool đúng domain, nhận
-kết quả tool rồi mới handoff typed result cho Coordinator.
+trong `src/agents/llm_agents.py`. Mỗi agent bắt buộc gọi LLM để chọn đúng domain
+tool; runtime thực thi tool rồi handoff typed result cho Coordinator. Không gọi
+LLM lần hai chỉ để diễn đạt lại kết quả đã được type hóa.
 
 Prompt chuyên biệt được load từ `src/prompts/<agent>.md`. Prompt chỉ mô tả vai
 trò và contract; Python schema/tool/verifier vẫn là authority cuối cùng.
