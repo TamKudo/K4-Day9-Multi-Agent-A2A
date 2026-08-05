@@ -1,7 +1,5 @@
 # Member Role Report — Day 9: Multi Agent A2A
 
-> Mỗi thành viên trong nhóm tự hoàn thành mẫu này để báo cáo đúng vai trò, phần việc và mức hiểu của mình. Không sao chép nguyên báo cáo chung hoặc báo cáo của thành viên khác. Thay nội dung trong dấu `[ ]` và xóa các dòng hướng dẫn không cần thiết trước khi nộp.
-
 ## 1. Thông tin cá nhân
 
 | Thông tin       | Nội dung                 |
@@ -16,164 +14,107 @@
 
 ### Phần việc sở hữu
 
-| Module/deliverable                | File/hàm phụ trách                         | Input nhận vào                              | Output bàn giao                                              | Trạng thái  |
-| --------------------------------- | ------------------------------------------ | ------------------------------------------- | ------------------------------------------------------------ | ---------- |
-| Agent orchestration + tool schema | [src/agents/llm_agents.py](C:/Users/toant/Desktop/K4-Day9-Multi-Agent-A2A/src/agents/llm_agents.py) + [src/order_product_agent.py](C:/Users/toant/Desktop/K4-Day9-Multi-Agent-A2A/src/order_product_agent.py) | CaseInput (includes case_id, investigation_scope) | LLMOrderProductAgent.invoke -> OlistOrderProductAgent.investigate(case) trả về OrderProductResult (item_ids, seller_ids, product_ids, category_names, item_total_brl, freight_total_brl) | Hoàn thành |
-| Deterministic order/product logic | [src/order_product_agent.py](C:/Users/toant/Desktop/K4-Day9-Multi-Agent-A2A/src/order_product_agent.py)   | CaseInput (case + claimed_order_id)      | OlistOrderProductAgent.investigate trả về OrderProductResult (see schemas) — deduped lists, item/product/category lists, and BRL totals rounded to 2 decimals | Hoàn thành |
+| Module/deliverable | File/hàm phụ trách | Input nhận vào | Output bàn giao | Trạng thái |
+| --- | --- | --- | --- | --- |
+| Order & Product Agent | `src/order_product_agent.py`; `OlistOrderProductAgent` | `CaseInput` và `DataRepository` | `OrderProductResult` chứa order_id, order_status, item_ids, seller_ids, product_ids, category_names, item_total_brl, freight_total_brl | Hoàn thành |
+| LLM Order & Product Agent | `src/agents/llm_agents.py`; `LLMOrderProductAgent` | `CaseInput`, `OlistOrderProductAgent` (tool) và `LLMClient` | `OrderProductResult` thông qua LLM-tool orchestration | Hoàn thành |
+| Kiểm thử module | `tests/test_order_product_agent.py` | Dữ liệu Olist và case mẫu | 1 unit test cho Order & Product Agent | Hoàn thành |
 
-Chỉ nhận ownership cho phần trực tiếp triển khai: định nghĩa schema tool (JSON Schema), thực thi tool ở Python, và orchestration hội thoại LLM → tool → LLM.
+Order & Product Agent là dependency dùng chung cho Payment, Delivery và Policy Agent. Nó truy vấn order, items, seller, product metadata từ Data Repository (read-only, defensive copy), tính toán item_total_brl và freight_total_brl, và bàn giao `OrderProductResult` cho Coordinator.
 
 ### Việc hỗ trợ ngoài phạm vi chính
 
-| Hoạt động                 | Thành viên/module được hỗ trợ | Kết quả                 |
-| ------------------------- | ----------------------------- | ----------------------- |
-| Tích hợp & test local     | Toàn bộ pipeline LLM–Tool   | Đã cung cấp snippet kiểm thử (xem phần 4)      |
+| Hoạt động | Thành viên/module được hỗ trợ | Kết quả |
+| --- | --- | --- |
+| Thống nhất data contract | Coordinator và các domain agent khác | Chuẩn hóa cách xử lý null, `Decimal` cho giá/phí, thứ tự item_ids, seller_ids, product_ids và giới hạn schema. |
 
 ## 3. Kết quả theo vai trò
 
-| Nhiệm vụ đã thực hiện                                | File/hàm/artifact liên quan                                                                 | Kết quả bàn giao                                                                                 | Cách xác minh                                                                 |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| Định nghĩa Tool schema và orchestration cuộc hội thoại | [agents.py](C:/Users/toant/Desktop/K4-Day9-Multi-Agent-A2A/agents.py)                       | OrderProductAgent.run(order_id, items_raw) trả về final_json và trace                        | Chạy script kiểm thử Python (ví dụ bên dưới) và kiểm tra cấu trúc JSON trả về  |
-| Triển khai hàm trích xuất entities                   | [tools.py](C:/Users/toant/Desktop/K4-Day9-Multi-Agent-A2A/tools.py)                         | extract_order_product_info trả về dict với giới hạn seller_ids (max 3) và product_ids (max 5) | Chạy trực tiếp hàm với dữ liệu mẫu và so sánh output với mong đợi              |
+| Nhiệm vụ đã thực hiện | File/hàm/artifact liên quan | Kết quả bàn giao | Cách xác minh |
+| --- | --- | --- | --- |
+| Xây Order & Product Agent | `src/order_product_agent.py` | OlistOrderProductAgent.investigate trả về `OrderProductResult` với order metadata, item_ids, seller_ids, product_ids, category_names và totals (item_total_brl, freight_total_brl) | `tests/test_order_product_agent.py` |
+| LLM wrapper cho agent | `src/agents/llm_agents.py` | LLMOrderProductAgent.investigate gọi OlistOrderProductAgent thông qua LLM-tool orchestration | Tích hợp trong Coordinator pipeline |
+| Xử lý dữ liệu từ repository | `src/order_product_agent.py` | Deduplicate seller_ids, product_ids, category_names; tính tổng tiền item và phí vận chuyển bằng `Decimal` rồi convert sang `float` (BRL) | Test deduplication, totals chính xác |
+| Kiểm tra lỗi dữ liệu | `ContractError` trong Order & Product Agent | Báo lỗi khi không tìm thấy order, thiếu items hoặc `investigation_scope` không yêu cầu product context | Test missing order / empty items |
 
-Nêu một output cụ thể mà phần việc của bạn tạo ra hoặc giúp xác minh:
-
-- Artifact: JSON object theo định dạng cuối cùng (final_json) do agent trả về. Ví dụ mẫu:
-
-{
-  "order_id": "ord123",
-  "order_status": "delivered",
-  "affected_entities": {
-    "item_ids": ["ord123:1", "ord123:2"],
-    "seller_ids": ["sellerA", "sellerB"]
-  },
-  "product_context": {
-    "product_ids": ["prod1", "prod2"],
-    "category_names": ["electronics"]
-  },
-  "item_total_brl": 123.45,
-  "freight_total_brl": 10.0
-}
+Một artifact cụ thể của phần việc là `OrderProductResult`. Với một case, agent trả về tất cả metadata của order (status, item IDs, seller IDs, product IDs, category names) và tính toán tổng tiền. Các ID và giá trị này là facts lấy trực tiếp từ CSV repository, không do agent suy đoán.
 
 ## 4. Giải thích phần kỹ thuật đã thực hiện
 
 ### Vấn đề cần giải quyết
 
-- Xây dựng một agent orchestration pattern: cho phép LLM quyết định gọi một Python tool (Function Calling-style), thực thi tool ở runtime, nạp kết quả trở lại ngữ cảnh và để LLM trả về một JSON tiêu chuẩn cuối cùng. Mục tiêu: tách rõ phần logic xử lý dữ liệu (deterministic Python) và reasoning (LLM).
+Cần trích xuất metadata của order (items, sellers, products, categories) từ dữ liệu Olist, deduplicate các IDs, tính tổng tiền items và phí vận chuyển, rồi tạo result để các domain agent khác (Payment, Delivery) sử dụng. Khi chưa có product context yêu cầu, product_ids phải bị xóa để không gây lộn dữ liệu ngữ cảnh.
 
 ### Cách triển khai
 
-- agents.py (OrderProductAgent):
-  - Định nghĩa một tool descriptor theo chuẩn JSON Schema để LLM biết cách tạo tool call.
-  - Gửi tin nhắn system + user tới model, yêu cầu model phải gọi tool extract_order_product_info (tắt lựa chọn bỏ qua bằng tool_choice).
-  - Khi nhận tool_call từ LLM, parse arguments (JSON), gọi hàm Python thực tế (tools.extract_order_product_info), rồi nạp role="tool" message chứa kết quả vào lịch sử cuộc hội thoại.
-  - Gọi model lần tiếp theo để nhận final_json (được yêu cầu trả về dạng JSON object bằng response_format).
-  - Trả về final_json và một trace object để tiện debug/kiểm tra.
+`OlistOrderProductAgent` nhận `OrderProductRepository` (protocol) và một `CaseInput`. Nó thực hiện chuỗi lookup:
+1. Lấy order từ repository theo `claimed_order_id`.
+2. Nếu order không tồn tại, raise `ContractError`.
+3. Lấy danh sách items của order.
+4. Tạo item_ids theo format `"{order_id}:{item_id}"`.
+5. Deduplicate seller_ids, product_ids theo thứ tự xuất hiện đầu tiên (_stable_unique).
+6. Nếu `investigation_scope.include_product_context=True`, lặp product_ids để lấy category_name và deduplicate.
+7. Nếu false, xóa product_ids và category_names.
+8. Tính item_total_brl (sum của `price`) và freight_total_brl (sum của `freight_value`) dùng `Decimal`, convert sang float.
+9. Trả về `OrderProductResult`.
 
-- src/order_product_agent.py (OlistOrderProductAgent):
-  - Lấy order, items và (tuỳ chọn) product context từ repository theo case.customer_request.claimed_order_id.
-  - Tạo item_ids theo format "{order_id}:{order_item_id}".
-  - Dedupe seller_ids, product_ids và category_names bằng _stable_unique (preserve order).
-  - Nếu investigation_scope.include_product_context=True, gọi repository.get_product(product_id) để thu category names; nếu False, product_ids được trả về rỗng.
-  - Tính item_total và freight_total bằng Decimal và convert về float BRL với làm tròn 2 chữ số bằng _brl().
-  - Trả về OrderProductResult (typed dataclass). Lưu ý: giới hạn số phần tử (truncate) được áp dụng khi assemble final CaseOutput trong coordinator, không ở bước agent.
+`LLMOrderProductAgent` (trong `src/agents/llm_agents.py`) bao quanh `OlistOrderProductAgent` bằng cơ chế `AgentToolInvoker`, ghi trace tool_name, expected_arguments và handler khi gọi qua LLM orchestration.
 
 ### Input, output và contract
 
-| Thành phần              | Mô tả                                                                 |
-| ----------------------- | --------------------------------------------------------------------- |
-| Input                   | CaseInput (see src/schemas.py): case_id, customer_request.claimed_order_id, investigation_scope.include_product_context, policy_version |
-| Output                  | OrderProductResult (src/schemas.py): order_id, order_status, item_ids, seller_ids, product_ids, category_names, item_total_brl, freight_total_brl |
-| Module phụ thuộc        | OrderProductRepository protocol + src/order_product_agent.py (deterministic lookup/aggregation) |
-| Module sử dụng output   | src/coordinator.py assembles CaseOutput from agent results and enforces final size limits (item_ids[:5], seller_ids[:3], product_ids[:5], category_names[:5]) |
-| Điều kiện lỗi cần xử lý | - Không tìm thấy order -> raise ContractError (handled in investigate)
-|                         | - Không có items -> agent trả OrderProductResult với chỉ order_id/order_status (no item rows)
-|                         | - CaseInput invalid -> schemas.validate() raises ContractError
+| Thành phần | Mô tả |
+| --- | --- |
+| Input | `DataRepository(data_dir)` nạp CSV; `OlistOrderProductAgent.investigate` nhận `CaseInput` có `claimed_order_id` và `investigation_scope` |
+| Output | `OrderProductResult` với order_id, order_status, item_ids, seller_ids, product_ids, category_names, item_total_brl, freight_total_brl (float) |
+| Module phụ thuộc | `src/schemas.py` cho `CaseInput`, `OrderProductResult`, `ContractError`; 9 CSV Olist trong `data/` |
+| Module sử dụng output | Coordinator, Payment Agent, Delivery Agent và Policy Agent |
+| Điều kiện lỗi cần xử lý | Order không tồn tại, không có items, missing order_status, null product_category_name |
 
 ### Cách xác minh
 
-Kiểm thử / xác minh (quick):
-
-- Unit tests: chạy test suite có sẵn để kiểm tra toàn bộ pipeline (LLM tool-calling + deterministic tools):
-
 ```bash
-# chạy tất cả tests trong thư mục tests
-python -m unittest discover -s tests -p "test_*.py"
+python -m unittest tests.test_order_product_agent -v
 ```
 
-- Kiểm thử nhanh hàm deterministic (direct):
-
-```python
-from src.order_product_agent import OlistOrderProductAgent
-
-# Thay repository bằng stub/fixture phù hợp (repo phải implement get_order, get_items_by_order, get_product)
-# Sử dụng test stubs ở tests/stubs.py để dễ chạy trong local test suite.
-
-# Example (conceptual):
-# repo = YourStubRepository()
-# agent = OlistOrderProductAgent(repo)
-# case = CaseInput.from_dict({...})
-# result = agent.investigate(case)
-# assert "ord123:1" in result.item_ids
-```
-
-- Để kiểm tra end-to-end, chạy test AgenticPipelineTests trong tests/test_llm_agents.py (mocks fake-llm are used there).
+- **Kết quả mong đợi:** Order Agent trích xuất order, items, sellers, products chính xác; tính totals đúng; preserve source order; comply schema.
+- **Kết quả thực tế:** 1 test pass (test_real_case_preserves_source_order_and_totals); case load order_id, verify status="delivered", 2 item_ids, item_total_brl=220.64, freight_total_brl=16.70, categories=['beleza_saude'].
+- **Artifact/log:** `tests/test_order_product_agent.py`; không chứa API key hoặc secret.
 
 ## 5. Một quyết định kỹ thuật quan trọng
 
-- Bối cảnh: Làm sao đảm bảo LLM thực thi tool deterministic (Python) thay vì 'bịa' kết quả nội suy?
-- Các phương án đã cân nhắc:
-  1) Tin tưởng model và parse trực tiếp output do model tạo (không gọi tool thực sự).  
-  2) Bắt buộc model gọi một tool descriptor và thực thi hàm Python để có kết quả chính xác, sau đó nạp lại vào ngữ cảnh.
-- Phương án đã chọn: Phương án 2 — thiết kế Function-Calling-like descriptor và ép model gọi tool bằng tool_choice, sau đó thực thi Python tool.
-- Lý do: Độ tin cậy và reproducibility cao hơn — phần trích xuất, dedupe và giới hạn kích thước được thực hiện bằng code có thể kiểm tra, test và debug; tránh model hallucination về các entity.
-- Bằng chứng: trace chứa tool_execution_result, dễ kiểm tra và so sánh với final_json; unit test cho tools.extract_order_product_info có thể xác nhận các ranh giới (max 3/5).
+- **Bối cảnh:** Làm sao đảm bảo Order & Product Agent trích xuất được dữ liệu đúng từ repository và không bị ảnh hưởng bởi LLM reasoning hay hallucination?
+- **Các phương án đã cân nhắc:** (1) để LLM trực tiếp đọc CSV và tóm tắt (hallucination risk); (2) repository cung cấp deterministic lookup, agent gọi repository functions, trả về typed result.
+- **Phương án đã chọn:** Phương án 2 — `DataRepository` là shared dependency, agent lookup từ repository, không bọc LLM call.
+- **Lý do:** Phương án này tránh hallucination, đảm bảo reproducibility; tất cả agent nhận cùng facts theo thứ tự nguồn; test và debug dễ hơn.
+- **Bằng chứng quyết định phù hợp:** Unit test xác nhận item_total_brl=220.64, freight_total_brl=16.70, deduplicate và preserve source order; code có thể kiểm tra.
 
 ## 6. Một lỗi hoặc blocker đã xử lý
 
-- Triệu chứng/lỗi nguyên văn: "Pipeline gián đoạn: LLM không kích hoạt Tool Call." (raised Exception trong code nếu message_1.tool_calls rỗng)
-- Lệnh hoặc bước tái hiện: Gọi agent.run(order_id, items_raw) mà model trả lời dạng text mà không tạo tool_call.
-- Nguyên nhân gốc: Model có thể không chọn gọi function/tool nếu prompt không bắt buộc hoặc nếu temperature cao dẫn tới quyết định khác. Ngoài ra, nếu tools_schema không đúng format, model sẽ không produce tool_call.
-- Cách xử lý:
-  - Thêm `tool_choice` trong request để ép LLM phải gọi function cụ thể.
-  - Giữ temperature=0.0 để có hành vi quyết định determinisitc từ model.
-  - Bắt lỗi rõ ràng và raise Exception nếu tool_call không xuất hiện để không silent-fail pipeline.
-- Cách xác minh sau khi sửa: Chạy lại agent.run với dữ liệu mẫu và kiểm tra rằng response_1.choices[0].message.tool_calls tồn tại; trace.tool_called == True.
-- Điều học được: Khi phối hợp LLM và code, cần có cơ chế bắt buộc hoặc fallback rõ ràng để tránh mất mạch pipeline do model behaviour.
-
-Nếu chưa xử lý xong: (n/a — đã áp dụng tool_choice và exception handling)
+- **Triệu chứng/lỗi nguyên văn:** `TypeError: expected float, got Decimal` khi serialize OrderProductResult sang JSON.
+- **Lệnh hoặc bước tái hiện:** Gọi agent.investigate(case) trả về result với `item_total_brl` là Decimal object.
+- **Nguyên nhân gốc:** Sum tiền dùng `Decimal` để tránh sai số float, nhưng khi serialize JSON, Decimal không tự convert sang float.
+- **Cách xử lý:** Dùng hàm `_brl()` để convert Decimal sang float với rounding=ROUND_HALF_UP và quantize('0.01') trước khi nạp vào result.
+- **Cách xác minh sau khi sửa:** Chạy unittest, kiểm tra `result.item_total_brl` là float, giá trị bằng 220.64 (đúng).
+- **Điều học được:** Khi tính toán tiền, dùng Decimal cho độ chính xác, nhưng convert sang float trước serialization để tránh type errors và ensure JSON compatibility.
 
 ## 7. Hiểu biết về luồng end-to-end
 
-1. Dữ liệu đi từ Crossref đến vector index như thế nào?
-   - Trong bài lab chung: raw documents (ví dụ Crossref metadata) được thu thập, tiền xử lý (normalize, extract fields), rồi chuyển sang bước embedding (vectorization). Sau đó vectors được lưu vào một vector index (ví dụ FAISS, Milvus, Pinecone). Ở repo hiện tại, extract_order_product_info là bước tiền xử lý/normalized entity trước khi tạo context metadata cho embedding.
+1. Input case cung cấp `claimed_order_id` và `investigation_scope`. Coordinator gửi `CaseInput` cho các domain agent (Customer, Order & Product, Payment, Delivery, Policy).
+2. Order & Product Agent truy vấn Data Repository để lấy order, items, sellers, products (read-only, defensive copy). Không suy đoán, không gọi LLM cho phần này — chỉ lookup + aggregate từ CSV.
+3. Order & Product Agent trả `OrderProductResult` chứa order metadata, item_ids, seller_ids, product_ids, category_names, item_total_brl, freight_total_brl.
+4. Payment Agent nhận OrderProductResult để đối soát tiền; Delivery Agent dùng nó để kiểm tra shipping. Policy Agent tổng hợp kết quả của tất cả domain agent để áp dụng EC_POLICY_V2.
+5. Coordinator ghép thành `CaseOutput`. Verifier kiểm tra schema và audit trail. Output được ghi vào `output/`.
+6. Data quality check vs policy: Order & Product Agent và Data Repository kiểm tra facts, format, contract; Policy Agent xác định refund, actions. Tách biệt để không dùng policy che lỗi dữ liệu.
 
-2. Evaluation set và ground-truth document IDs dùng để đo retrieval/answer quality ra sao?
-   - Evaluation set chứa các truy vấn đã biết và map tới ground-truth document IDs (tài liệu đúng). Khi chạy retrieval, so sánh top-K results với ground-truth IDs để tính metrics như recall@K, precision@K, MRR.
-
-3. Quality checks khác freshness monitoring ở điểm nào trong bài lab?
-   - Freshness monitoring kiểm tra xem index được cập nhật/refresh với dữ liệu mới gần đây hay không (thời gian). Quality checks còn bao gồm deduplication, completeness, schema validation, và đếm anomalies (missing fields, malformed records) — những thứ ảnh hưởng trực tiếp tới chất lượng embedding và retrieval.
-
-4. Vì sao phải dùng cùng test set cho baseline, corrupted và repaired?
-   - Để đảm bảo so sánh công bằng: dùng cùng queries và same ground-truth đánh giá liệu repair có thực sự cải thiện metrics so với baseline và corrupted. Nếu test set khác nhau, thay đổi metric có thể do khác biệt dữ liệu chứ không phải do phương pháp.
-
-5. Repair được xem là thành công dựa trên artifact và metric nào?
-   - Artifact: repaired documents / repaired metadata / corrected entity lists và updated index snapshots.
-   - Metric: tăng Recall@K, MRR, hoặc giảm error rate trong downstream QA. Thành công khi metrics trên test set cho thấy cải thiện có ý nghĩa so với corrupted baseline, đồng thời không làm giảm quá nhiều các metric khác.
-
-**Câu trả lời:**
-
-Phần code mình viết đảm nhận bước tiền xử lý entity (extract_order_product_info) và orchestration LLM→tool→LLM. Dữ liệu order/items được chuẩn hóa thành entity lists (item_ids, seller_ids, product_ids) và được giới hạn kích thước để không quá tải ngữ cảnh model hoặc downstream pipeline.
+Phần code mình viết đảm nhận bước trích xuất order/product metadata từ repository (deterministic, testable) và aggregate totals bằng `Decimal` để tránh sai số.
 
 ## 8. Cam kết của thành viên
 
-Đánh dấu sau khi tự kiểm tra:
-
 - [x] Nội dung báo cáo phản ánh đúng phần việc và mức hiểu của tôi.
 - [x] Tôi có thể giải thích luồng end-to-end, không chỉ module mình phụ trách.
-- [x] Tôi không ghi “đã chạy thành công” cho phần chưa được kiểm chứng.
+- [x] Tôi không ghi "đã chạy thành công" cho phần chưa được kiểm chứng.
 - [x] Báo cáo không chứa `.env`, API key, token hoặc secret.
 - [x] Báo cáo này không phải bản sao nguyên văn của báo cáo nhóm hoặc báo cáo thành viên khác.
 
-**Họ và tên:** Tran Van Toan
+**Họ và tên:** Trần Văn Toàn
 **Ngày xác nhận:** 2026-08-05
