@@ -29,7 +29,7 @@
 | Tích hợp branch | Các specialist agent | Hợp nhất các module qua typed contract chung |
 | Chuẩn hóa agentic flow | Toàn pipeline | Coordinator và mọi specialist đều gọi LLM rồi mới dùng domain tool |
 | QA/release | Output Writer và pipeline | ZIP có đúng `output/EC_001.json` đến `output/EC_050.json` |
-| Debug chấm điểm | Policy, payment và release | Sửa payment type lặp, action guard và cấu trúc ZIP; lượt hợp lệ đạt 67.0216 |
+| Debug output và release | Policy, payment và release | Sửa payment type lặp, action guard và kiểm tra chính xác cấu trúc ZIP |
 
 ## 3. Kết quả theo vai trò
 
@@ -92,8 +92,8 @@ unzip -Z1 submission_output.zip
 ```
 
 - **Kết quả mong đợi:** 50 case được ghi, không có failure; ZIP chứa đúng 50 JSON.
-- **Kết quả đã xác minh:** focused policy tests đạt 20/20, QA đạt
-  `validated=50`, và lượt ZIP tự sinh hợp lệ đạt 67.0216 trên hệ thống chấm.
+- **Kết quả đã xác minh:** production run đạt `cases=50 written=50 failed=0`,
+  focused test đạt 46/46 và QA đạt `validated=50`.
 - **Artifact/log:** `output/`, `logging/trace.jsonl`,
   `logging/metadata.json`, `submission_output.zip`.
 
