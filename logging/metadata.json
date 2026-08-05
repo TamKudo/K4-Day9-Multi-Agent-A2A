@@ -1,0 +1,7 @@
+{
+  "model": "qwen/qwen3-8b",
+  "parameter_size": "8B",
+  "framework": "OpenRouter Chat Completions API + Python tools",
+  "runtime": "python 3.11",
+  "cases": 50
+}

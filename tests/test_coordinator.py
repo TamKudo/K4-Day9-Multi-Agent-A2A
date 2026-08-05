@@ -2,11 +2,11 @@ import unittest
 
 from src.coordinator import Coordinator
 from src.schemas import (
-    CaseInput, CaseStatus, CustomerRequest, CustomerResult, DeliveryResult,
-    InvestigationScope, OrderProductResult, PartyType, PaymentResult,
-    PolicyResult, PrimaryIssue, RankedCause, ResponsibleParty, RootCauseCode,
-    SecondaryIssue, SellerHandoff,
+    CaseInput, CaseStatus, CustomerRequest, InvestigationScope,
+    OrderProductResult, PartyType, PolicyResult, PrimaryIssue, RankedCause,
+    ResponsibleParty, RootCauseCode, SecondaryIssue,
 )
+from tests.stubs import CustomerStub, DeliveryStub, OrderStub, PaymentStub
 
 
 CASE = CaseInput(
@@ -15,34 +15,6 @@ CASE = CaseInput(
     investigation_scope=InvestigationScope(True, True),
     policy_version="EC_POLICY_V2",
 )
-
-
-class CustomerStub:
-    def investigate(self, case):
-        return CustomerResult("customer-1", ["old-order"])
-
-
-class OrderStub:
-    def investigate(self, case):
-        return OrderProductResult(
-            "order-1", "delivered", ["order-1:1"], ["seller-1"],
-            ["product-1"], ["category-1"], 194.0, 18.27,
-        )
-
-
-class PaymentStub:
-    def investigate(self, case, order):
-        return PaymentResult(["order-1:1"], 212.27, 212.27, 0.0, True, ["credit_card"])
-
-
-class DeliveryStub:
-    def investigate(self, case, order):
-        return DeliveryResult(
-            "2018-03-31 15:23:33", "2018-03-28 00:00:00",
-            "2018-03-15 21:33:51", 87.39,
-            [SellerHandoff("seller-1", "2018-03-15 20:31:15", 1.04, True)],
-            ["seller-1"],
-        )
 
 
 class PolicyStub:
@@ -93,6 +65,66 @@ class CoordinatorTests(unittest.TestCase):
         )
         self.assertEqual(("coordinator", "case_started", {}), trace.events[0])
         self.assertEqual(("coordinator", "case_completed", {}), trace.events[-1])
+
+    def test_evidence_covers_every_seller_not_just_the_responsible_one(self):
+        """A logistics verdict still rests on who shipped the order."""
+
+        class TwoSellerOrder:
+            def investigate(self, case):
+                return OrderProductResult(
+                    "order-1", "delivered", ["order-1:1", "order-1:2"],
+                    ["seller-1", "seller-2"], ["product-1"], ["category-1"],
+                    194.0, 18.27,
+                )
+
+        class LogisticsPolicy:
+            def evaluate(self, case, customer, order, payment, delivery):
+                return PolicyResult(
+                    PrimaryIssue.LATE_DELIVERY_LOGISTICS, [], CaseStatus.ACTION_REQUIRED,
+                    0.95,
+                    [RankedCause(RootCauseCode.CARRIER_DELIVERED_AFTER_ESTIMATE, 1)],
+                    [ResponsibleParty(PartyType.LOGISTICS_PROVIDER, "LOGISTICS_PROVIDER")],
+                    18.27, ["refund_freight"],
+                )
+
+        coordinator = Coordinator(
+            CustomerStub(), TwoSellerOrder(), PaymentStub(), DeliveryStub(),
+            LogisticsPolicy(), VerifierStub(), MemoryTrace(),
+        )
+
+        evidence = coordinator.process(CASE).to_dict()["evidence_ids"]
+
+        self.assertIn("seller:seller-1", evidence)
+        self.assertIn("seller:seller-2", evidence)
+
+    def test_responsible_seller_leads_the_seller_evidence(self):
+        class ManySellerOrder:
+            def investigate(self, case):
+                return OrderProductResult(
+                    "order-1", "delivered", ["order-1:1"],
+                    ["seller-a", "seller-b", "seller-c", "seller-late"],
+                    ["product-1"], ["category-1"], 194.0, 18.27,
+                )
+
+        class LateSellerPolicy:
+            def evaluate(self, case, customer, order, payment, delivery):
+                return PolicyResult(
+                    PrimaryIssue.LATE_DELIVERY_SELLER, [], CaseStatus.ACTION_REQUIRED,
+                    0.95, [RankedCause(RootCauseCode.SELLER_HANDOFF_AFTER_LIMIT, 1)],
+                    [ResponsibleParty(PartyType.SELLER, "seller-late")],
+                    18.27, ["refund_freight"],
+                )
+
+        coordinator = Coordinator(
+            CustomerStub(), ManySellerOrder(), PaymentStub(), DeliveryStub(),
+            LateSellerPolicy(), VerifierStub(), MemoryTrace(),
+        )
+
+        sellers = [e for e in coordinator.process(CASE).to_dict()["evidence_ids"]
+                   if e.startswith("seller:")]
+
+        self.assertEqual("seller:seller-late", sellers[0])
+        self.assertEqual(3, len(sellers))
 
 
 if __name__ == "__main__":

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import os
+import random
+import time
 from hashlib import sha256
 from dataclasses import asdict, dataclass, field, is_dataclass
 from enum import Enum
@@ -19,6 +21,31 @@ from .schemas import ContractError
 from .prompt_loader import PROMPT_FILES, PromptLoader
 
 T = TypeVar("T")
+
+# Declared in source, never in .env, so the <=10B lab constraint is auditable.
+MODEL_NAME = "qwen/qwen3-8b"
+MODEL_PARAMETER_SIZE = "8B"
+DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+TOOL_MAX_TOKENS = 256
+HANDOFF_MAX_TOKENS = 32
+MAX_RETRIES = 6
+RETRY_BASE_DELAY = 2.0
+RETRY_MAX_DELAY = 30.0
+
+
+def load_env_file(path: "Any" = None) -> None:
+    """Load KEY=value pairs from .env without overriding real env vars."""
+    from pathlib import Path
+
+    env_path = Path(path) if path else Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.is_file():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip("'\""))
 
 
 @dataclass(frozen=True)
@@ -72,11 +99,12 @@ class OpenAIResponsesLLM:
             from openai import OpenAI
         except ImportError as exc:
             raise RuntimeError("Install dependencies with: pip install -r requirements.txt") from exc
+        load_env_file()
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY is required for a real agent run")
-        # Kept in source (not .env) so the <=10B lab constraint is auditable.
-        model = "Qwen/Qwen3-8B"
+        # Model name lives in source, never in .env, so the run is auditable.
+        model = MODEL_NAME
         effort = os.getenv("OPENAI_REASONING_EFFORT", "low")
         base_url = os.getenv("OPENAI_BASE_URL")
         client = OpenAI(api_key=api_key, **({"base_url": base_url} if base_url else {}))
@@ -131,6 +159,129 @@ class OpenAIResponsesLLM:
         )
         usage = response.usage.model_dump() if response.usage is not None else {}
         return AgentCompletion(response.id, response.model, response.output_text, usage)
+
+
+class ChatCompletionsLLM:
+    """Chat Completions adapter for OpenAI-compatible providers.
+
+    Groq, OpenRouter and most <=10B model hosts expose Chat Completions rather
+    than the Responses API, so the tool-result handoff replays the conversation
+    instead of relying on ``previous_response_id``.
+    """
+
+    def __init__(self, client: Any, model: str) -> None:
+        self._client = client
+        self.model = model
+        self._turns: Dict[str, List[Dict[str, Any]]] = {}
+
+    def _create(self, **kwargs: Any) -> Any:
+        """Call the provider, retrying the shared pool's rate limits.
+
+        Free upstream pools return 429 under concurrency; the run is worthless
+        if a transient limit drops a case, so back off and retry.
+        """
+        delay = RETRY_BASE_DELAY
+        for attempt in range(MAX_RETRIES):
+            try:
+                return self._client.chat.completions.create(**kwargs)
+            except Exception as exc:
+                status = getattr(exc, "status_code", None)
+                retryable = status in (408, 409, 429, 500, 502, 503, 504)
+                if not retryable or attempt == MAX_RETRIES - 1:
+                    raise
+                time.sleep(delay + random.uniform(0, delay / 2))
+                delay = min(delay * 2, RETRY_MAX_DELAY)
+        raise RuntimeError("unreachable")
+
+    @classmethod
+    def from_env(cls) -> "ChatCompletionsLLM":
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise RuntimeError(
+                "Install dependencies with: pip install -r requirements.txt"
+            ) from exc
+        load_env_file()
+        api_key = (
+            os.getenv("OPENROUTER_API_KEY")
+            or os.getenv("GROQ_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+        )
+        if not api_key:
+            raise RuntimeError(
+                "OPENROUTER_API_KEY (or GROQ_API_KEY / OPENAI_API_KEY) is required "
+                "for a real agent run"
+            )
+        base_url = os.getenv("OPENAI_BASE_URL", DEFAULT_BASE_URL)
+        return cls(OpenAI(api_key=api_key, base_url=base_url), MODEL_NAME)
+
+    def request_tool(
+        self, *, agent_name: str, instructions: str, user_input: str,
+        tool_name: str, tool_description: str, parameters: Dict[str, Any],
+    ) -> ToolDecision:
+        messages: List[Dict[str, Any]] = [
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": user_input},
+        ]
+        response = self._create(
+            model=self.model,
+            messages=messages,
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": tool_name, "description": tool_description,
+                    "parameters": parameters,
+                },
+            }],
+            tool_choice={"type": "function", "function": {"name": tool_name}},
+            max_tokens=TOOL_MAX_TOKENS,
+            # Qwen3 rejects a forced tool_choice while thinking mode is on.
+            extra_body={"reasoning": {"enabled": False}},
+        )
+        message = response.choices[0].message
+        calls = list(message.tool_calls or [])
+        if len(calls) != 1 or calls[0].function.name != tool_name:
+            raise ContractError(
+                f"{agent_name}: expected one {tool_name} tool call, got {len(calls)}"
+            )
+        try:
+            arguments = json.loads(calls[0].function.arguments)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ContractError(f"{agent_name}: invalid tool arguments") from exc
+        usage = response.usage.model_dump() if response.usage is not None else {}
+        # Chat Completions is stateless: keep the turn for the handoff call.
+        self._turns[response.id] = messages + [
+            {
+                "role": "assistant", "content": message.content,
+                "tool_calls": [{
+                    "id": calls[0].id, "type": "function",
+                    "function": {
+                        "name": tool_name, "arguments": calls[0].function.arguments,
+                    },
+                }],
+            }
+        ]
+        return ToolDecision(
+            tool_name, arguments, response.id, response.model, usage, calls[0].id
+        )
+
+    def submit_tool_result(
+        self, *, agent_name: str, decision: ToolDecision, result: Any,
+    ) -> AgentCompletion:
+        messages = self._turns.pop(decision.response_id, [])
+        messages = messages + [{
+            "role": "tool", "tool_call_id": decision.call_id,
+            "content": json.dumps(_jsonable(result), ensure_ascii=False),
+        }]
+        response = self._create(
+            # The handoff acknowledgement is audit evidence, not data: a short
+            # cap keeps it ~5x faster than the free-form default.
+            model=self.model, messages=messages, max_tokens=HANDOFF_MAX_TOKENS,
+        )
+        usage = response.usage.model_dump() if response.usage is not None else {}
+        return AgentCompletion(
+            response.id, response.model, response.choices[0].message.content or "", usage
+        )
 
 
 class FakeToolCallingLLM:

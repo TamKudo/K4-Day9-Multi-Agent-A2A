@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -21,7 +22,10 @@ from src.customer_agent import CustomerAgent as CustomerTool
 from src.data_repository import DataRepository
 from src.delivery_agent import OlistDeliveryAgent
 from src.io import load_cases, write_output
-from src.llm_runtime import FakeToolCallingLLM, LLMClient, OpenAIResponsesLLM
+from src.llm_runtime import (
+    MODEL_NAME as LLM_MODEL_NAME, MODEL_PARAMETER_SIZE as LLM_PARAMETER_SIZE,
+    ChatCompletionsLLM, FakeToolCallingLLM, LLMClient,
+)
 from src.order_product_agent import OlistOrderProductAgent
 from src.payment_agent import OlistPaymentAgent
 from src.schemas import CaseInput, CaseOutput
@@ -34,9 +38,10 @@ TRACE_PATH = ROOT / "logging" / "trace.jsonl"
 METADATA_PATH = ROOT / "logging" / "metadata.json"
 
 # Declared in source, never in .env, per the submission rules.
-MODEL_NAME = "Qwen/Qwen3-8B"
-MODEL_PARAMETER_SIZE = "8B"
-FRAMEWORK = "OpenAI Responses API + Python tools"
+MODEL_NAME = LLM_MODEL_NAME
+MODEL_PARAMETER_SIZE = LLM_PARAMETER_SIZE
+DEFAULT_WORKERS = 6
+FRAMEWORK = "OpenRouter Chat Completions API + Python tools"
 
 
 @dataclass
@@ -88,7 +93,7 @@ def build_agents(use_stubs: bool, fake_llm: bool = False) -> AgentBundle:
         )
 
     repository = DataRepository(ROOT / "data")
-    llm: LLMClient = FakeToolCallingLLM() if fake_llm else OpenAIResponsesLLM.from_env()
+    llm: LLMClient = FakeToolCallingLLM() if fake_llm else ChatCompletionsLLM.from_env()
     return AgentBundle(
         CustomerTool(repository), OlistOrderProductAgent(repository),
         OlistPaymentAgent(repository), OlistDeliveryAgent(repository), policy,
@@ -97,31 +102,46 @@ def build_agents(use_stubs: bool, fake_llm: bool = False) -> AgentBundle:
 
 
 def run(agents: AgentBundle, cases: List[CaseInput], output_dir: Path,
-        trace_path: Path) -> Tuple[List[CaseOutput], List[Tuple[str, Exception]]]:
-    """Process every case; a failing case never aborts the remaining ones."""
-    outputs: List[CaseOutput] = []
-    failures: List[Tuple[str, Exception]] = []
+        trace_path: Path, workers: int = DEFAULT_WORKERS,
+        ) -> Tuple[List[CaseOutput], List[Tuple[str, Exception]]]:
+    """Process every case; a failing case never aborts the remaining ones.
+
+    Cases are independent, so they run concurrently. Results keep the input
+    order regardless of completion order.
+    """
+    results: Dict[str, Any] = {}
     with JsonlTrace(trace_path) as trace:
         coordinator = agents.into(trace)
         output_writer = (
             LLMOutputWriterAgent(agents.llm, write_output, trace)
             if agents.llm is not None else None
         )
-        for case in cases:
+
+        def process(case: CaseInput) -> Any:
             try:
                 output = coordinator.process(case)
                 if output_writer is None:  # focused deterministic unit-test path
                     write_output(output_dir, output)
                 else:
                     output_writer.write(output_dir, output)
+                return output
             except Exception as exc:
                 trace.record(
                     case.case_id, "coordinator", "case_failed",
                     error_type=type(exc).__name__, error=str(exc),
                 )
-                failures.append((case.case_id, exc))
-                continue
-            outputs.append(output)
+                return exc
+
+        if workers > 1 and len(cases) > 1:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                for case, result in zip(cases, pool.map(process, cases)):
+                    results[case.case_id] = result
+        else:
+            for case in cases:
+                results[case.case_id] = process(case)
+
+    outputs = [r for r in results.values() if not isinstance(r, Exception)]
+    failures = [(cid, r) for cid, r in results.items() if isinstance(r, Exception)]
     return outputs, failures
 
 
@@ -151,11 +171,13 @@ def main(argv: List[str]) -> int:
     parser.add_argument("--input-dir", type=Path, default=INPUT_DIR)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     parser.add_argument("--trace", type=Path, default=TRACE_PATH)
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
+                        help="cases to process concurrently (1 disables threading)")
     args = parser.parse_args(argv)
 
     cases = load_cases(args.input_dir)
     agents = build_agents(args.stubs, args.fake_llm)
-    outputs, failures = run(agents, cases, args.output_dir, args.trace)
+    outputs, failures = run(agents, cases, args.output_dir, args.trace, args.workers)
 
     model = agents.llm.model if agents.llm is not None else MODEL_NAME
     write_metadata(

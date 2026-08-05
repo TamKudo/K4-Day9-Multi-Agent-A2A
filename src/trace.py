@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 from types import TracebackType
 from typing import IO, Any, Dict, List, Optional, Type
 
@@ -19,6 +20,8 @@ class JsonlTrace:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._handle: Optional[IO[str]] = None
+        # Cases may run concurrently; one lock keeps each line intact.
+        self._lock = Lock()
 
     def __enter__(self) -> "JsonlTrace":
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -44,8 +47,10 @@ class JsonlTrace:
         }
         if details:
             entry["details"] = details
-        self._handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        self._handle.flush()
+        line = json.dumps(entry, ensure_ascii=False) + "\n"
+        with self._lock:
+            self._handle.write(line)
+            self._handle.flush()
 
     def close(self) -> None:
         if self._handle is not None:

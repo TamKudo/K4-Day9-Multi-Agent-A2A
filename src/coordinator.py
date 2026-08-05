@@ -136,11 +136,17 @@ def _evidence_ids(
     # large order can never crowd out responsible seller or policy evidence.
     evidence.extend(f"item:{item_id}" for item_id in order.item_ids[:5])
     evidence.extend(f"payment:{payment_id}" for payment_id in payment.payment_ids[:5])
-    evidence.extend(
-        f"seller:{party.party_id}"
-        for party in policy.responsible_parties[:3]
+    # Every seller on the order is case evidence, not just the responsible one:
+    # a logistics or platform verdict still rests on who shipped the order.
+    # Responsible sellers lead so they survive the affected-entity limit.
+    responsible = [
+        party.party_id for party in policy.responsible_parties[:3]
         if party.party_type.value == "seller"
-    )
+    ]
+    seller_ids = responsible + [
+        seller_id for seller_id in order.seller_ids if seller_id not in responsible
+    ]
+    evidence.extend(f"seller:{seller_id}" for seller_id in seller_ids[:3])
     evidence.extend(
         f"policy:{cause.cause_code.value}" for cause in policy.ranked_causes[:3]
     )
